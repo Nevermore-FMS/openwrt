@@ -1,0 +1,14 @@
+#!/bin/sh /etc/rc.common
+
+# TODO: Check these numbers, I'm guessing them for now.
+START=10
+STOP=20
+
+# Run the programmer without any output (Headless)
+start() {
+	frc-programmer&
+}
+
+stop() {
+	killall frc-programmer
+}
