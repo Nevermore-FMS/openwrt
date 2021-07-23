@@ -24,7 +24,7 @@ jobs:
     - name: Copy Config
       run: cp OM5P-AC.config .config
     - name: Build OpenWRT
-      run: make
+      run: make -j$(nproc)
     - name: Upload binary to release
       uses: svenstaro/upload-release-action@v2
       with:
