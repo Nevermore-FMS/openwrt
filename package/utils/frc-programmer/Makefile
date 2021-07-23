@@ -32,8 +32,8 @@ define Build/Compile
 endef
 
 define Package/frc-programmer/install
-	$(INSTALL_DIR) $(1)/usr/bin
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/frc-programmer $(1)/usr/bin/
+	$(INSTALL_DIR) $(1)/bin
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/frc-programmer $(1)/bin/
 endef
 
 $(eval $(call BuildPackage,frc-programmer))

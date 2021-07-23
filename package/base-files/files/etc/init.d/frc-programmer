@@ -2,7 +2,7 @@
 
 # TODO: Check these numbers, I'm guessing them for now.
 START=10
-STOP=20
+STOP=15
 
 # Run the programmer without any output (Headless)
 start() {
