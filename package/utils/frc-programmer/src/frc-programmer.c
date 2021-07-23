@@ -14,7 +14,11 @@
 #define ACCESSPOINT5G "AP5"
 #define ACCESSPOINT24G "AP24"
 #define BUFFER_SIZE 1024
-#define NUMBER_OF_FIELDS 10
+#define NUMBER_OF_FIELDS 11
+#define OPENWRT_VERSION_PATH "/etc/openwrt_version"
+#define EVENT_NAME_PATH "/etc/event_name"
+#define EVENT_END_TIME_PATH "/etc/event_end_time"
+
 
 int server_fd, client_fd;
 
@@ -41,6 +45,7 @@ struct Configuration
   char *unknown_1;
   char *unknown_2;
   char *event_name;
+  long end_date;
 };
 
 char *format(char *template, ...)
@@ -52,7 +57,6 @@ char *format(char *template, ...)
   int len = vsnprintf(NULL, 0, template, args);
   char *newstring = malloc(len + 1);
   vsnprintf(newstring, len + 1, template, args1);
-  info("%d\n", len);
   va_end(args);
   va_end(args1);
   return newstring;
@@ -71,6 +75,60 @@ void reply(char *buf)
     panic("Client write failed\n");
 }
 
+char* read_openwrt_version() {
+  FILE* fp = fopen(OPENWRT_VERSION_PATH,"r");
+  char* version = NULL;
+  size_t len = 0;
+  int read = getline(&version, &len, fp);
+  if (read == -1) {
+    return "19.0.1"; // Return a default value.
+  }
+  strtok(version, "\n");
+  fclose(fp);
+  return version;
+}
+
+char* read_event_name() {
+  FILE* fp = fopen(EVENT_NAME_PATH, "r");
+  char* name = NULL;
+  size_t len = 0;
+  int read = getline(&name, &len, fp);
+  if (read == -1) {
+    return "none"; // Return a default value.
+  }
+  strtok(name, "\n");
+  fclose(fp);
+  return name;
+}
+
+void write_event_name(char* event_name) {
+  remove(EVENT_NAME_PATH);
+  FILE* fp = fopen(EVENT_NAME_PATH, "w");
+  char* name = NULL;
+  fputs(event_name, fp);
+  fclose(fp);
+}
+
+char* read_event_end_time() {
+  FILE* fp = fopen(EVENT_END_TIME_PATH, "r");
+  char* time = NULL;
+  size_t len = 0;
+  int read = getline(&time, &len, fp);
+  if (read == -1) {
+    return "0"; // Return a default value.
+  }
+  strtok(time, "\n");
+  fclose(fp);
+  return time;
+}
+
+void write_event_end_time(char* event_end_time) {
+  remove(EVENT_END_TIME_PATH);
+  FILE* fp = fopen(EVENT_END_TIME_PATH, "w");
+  fputs(event_end_time, fp);
+  fclose(fp);
+}
+
 void commit_config() {
   system("uci commit wireless");
   system("uci commit network");
@@ -80,19 +138,19 @@ void commit_config() {
   system("uci commit system");
   system("/etc/init.d/dnsmasq restart");
   system("/etc/init.d/network restart");
-  info("Committed Changes");
+  info("Committed Changes\n");
 }
 
 void configure_network(struct Configuration config)
 {
-  char *team_ip_start = format("10.%i.%i\n", config.team_number, config.team_number);
+  char *team_ip_start = format("10.%i.%i", config.team_number / 100, config.team_number % 100);
 
   bool has_security = !strcmp(config.wpa_key, "");
   bool is_24G = config.mode == ACCESSPOINT24G || config.mode == BRIDGE24G;
   bool is_bridged = config.mode == BRIDGE5G || config.mode == BRIDGE24G;
 
   // Wifi Configuration
-  info("Configuring Wifi Networks");
+  info("Configuring Wifi Networks\n");
   system(format("uci set wireless.@wifi-iface[0].ssid=%s", config.ssid));
   system(format("uci set wireless.@wifi-iface[1].ssid=%s", config.ssid));
   system(format("uci set wireless.@wifi-iface[0].key=%s", config.wpa_key));
@@ -100,7 +158,7 @@ void configure_network(struct Configuration config)
 
   // TODO: Save Event ID and expiry date.
 
-  info("Configuring Wifi Security: %i", has_security);
+  info("Configuring Wifi Security: %i\n", has_security);
   if (has_security)
   {
     system(format("uci set wireless.@wifi-iface[0].encryption=psk2"));
@@ -114,7 +172,7 @@ void configure_network(struct Configuration config)
 
   if (is_bridged)
   {
-    info("Configuring IP for Bridge");
+    info("Configuring IP for Bridge\n");
     system(format("uci set network.stabridge.ipaddr=%s.1", team_ip_start));
     system(format("uci set network.lan.gateway=%s.4", team_ip_start));
     system(format("uci set network.wwan.ipaddr=%s.1", team_ip_start));
@@ -219,13 +277,13 @@ void configure_network(struct Configuration config)
   info("Configuring Firewall: %d\n", config.firewall);
   if (config.firewall)
   {
-    system(format("uci set firewall.@zone[0].network=\"lan wwan\""));
-    system(format("uci set firewall.@zone[1].network="));
+    system(format("uci set firewall.@zone[0].network=lan"));
+    system(format("uci set firewall.@zone[1].network=wan"));
   }
   else
   {
-    system(format("uci set firewall.@zone[0].network=lan"));
-    system(format("uci set firewall.@zone[1].network=wan"));
+    system(format("uci set firewall.@zone[0].network=\"lan wwan\""));
+    system(format("uci set firewall.@zone[1].network="));
   }
 
   info("Configuring QoS: %d\n", config.bandwidth_limiter);
@@ -240,6 +298,8 @@ void configure_network(struct Configuration config)
   }
 
   info("Committing Config...");
+  write_event_name(format("%s\n", config.event_name));
+  write_event_end_time(format("%i\n", config.end_date));
   commit_config();
 }
 
@@ -305,6 +365,10 @@ void handle_string(char *string)
       config.event_name = token;
       break;
 
+    case 10:
+      config.end_date = atol(token);
+      break;
+
     default:
       info("Too many values.\n");
       break;
@@ -320,13 +384,11 @@ void handle_string(char *string)
   }
 
   configure_network(config);
-
-  shutdown(client_fd, SHUT_RDWR);
 }
 
-char *form_initial_data()
+char* form_initial_data()
 {
-  return "test:test:19.0.1\n";
+  return format("0-1:%s:%s:%s\n", read_event_end_time(), read_openwrt_version(), read_event_name());
 }
 
 void handle_client()
@@ -358,9 +420,11 @@ void handle_client()
       {
         char *temp_string = malloc(strlen(total_string));
         strcpy(temp_string, total_string);
-        total_string = malloc(strlen(total_string) + 1);
+        int len = strlen(total_string);
+        total_string = (char*) malloc((len + 1) * sizeof(char));
         strcat(total_string, temp_string);
         strncat(total_string, &c, 1);
+        free(temp_string);
       }
     }
     if (strlen(total_string) > 1000)
@@ -368,7 +432,6 @@ void handle_client()
       panic("Message too long.");
     }
   }
-  close(client_fd);
 }
 
 int main(int argc, char *argv[])
