@@ -21,13 +21,24 @@ jobs:
         gettext git java-propose-classpath libelf-dev libncurses5-dev \
         libncursesw5-dev libssl-dev python python2.7-dev python3 unzip wget \
         python3-distutils python3-setuptools python3-dev rsync subversion swig time \
-        xsltproc zlib1g-dev
+        xsltproc zlib1g-dev wget
+    - name: Install Root Certificates
+      run: |
+        sudo apt-get install --reinstall ca-certificates
+        sudo mkdir /usr/local/share/ca-certificates/cacert.org
+        sudo wget -P /usr/local/share/ca-certificates/cacert.org http://www.cacert.org/certs/root.crt http://www.cacert.org/certs/class3.crt
+        sudo update-ca-certificates
+        git config --global http.sslCAinfo /etc/ssl/certs/ca-certificates.crt
+    - name: Update Feeds
+      run: ./scripts/feeds update
+    - name: Install Lua Sockets
+      run: ./scripts/feeds install luasocket
     - name: Copy Config
-      run: cp OM5P-AC.config .config
+      run: cp FRC-config .config
     - name: Build OpenWRT
       run: make -j$(nproc)
     - name: Upload Artifacts
       uses: actions/upload-artifact@v2.2.4
       with:
-        name: nevermore-fimware-om5p-ac-v2.bin
-        path: bin/targets/ath79/generic/openwrt-ath79-generic-openmesh_om5p-ac-v2-squashfs-sysupgrade.bin
+        name: nevermore-fimware-om5p-ac.bin
+        path: bin/targets/ar71xx/generic/openwrt-ar71xx-generic-om5pac-squashfs-factory.bin

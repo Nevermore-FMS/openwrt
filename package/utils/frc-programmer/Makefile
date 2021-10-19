@@ -17,6 +17,7 @@ include $(INCLUDE_DIR)/package.mk
 define Package/frc-programmer
   SECTION:=utils
   CATEGORY:=Base system
+  DEPENDS:=+lua +luasocket +qos-scripts
   TITLE:=Utility for running a FRC Radio Programmer compatible TCP server.
   MAINTAINER:=Chase MacDonnell <macdonnell.chase@gmail.com>
 endef
@@ -26,9 +27,7 @@ define Package/frc-programmer/description
 endef
 
 define Build/Compile
-	$(MAKE) -C $(PKG_BUILD_DIR) \
-		CC="$(TARGET_CC)" \
-		CFLAGS="$(TARGET_CFLAGS) -Wall"
+	echo "No Compilation Needed"
 endef
 
 define Package/frc-programmer/install

@@ -1,0 +1,243 @@
+#!/usr/bin/lua
+
+local socket = require("socket")
+local server = assert(socket.bind("*", 8888))
+local tcp = assert(socket.tcp())
+
+function bool_to_number (value) 
+    return value and 1 or 0
+end
+
+function read_event_end_time ()
+    local file = io.open("/etc/event_end_time", "r")
+    local time = file:read("*a")
+    file:close()
+    return time
+end
+
+function write_event_end_time (end_time)
+    local file = io.open("/etc/event_end_time", "w")
+    file:write(end_time)
+    file:close()
+end
+
+function read_openwrt_version ()
+    local file = io.open("/etc/openwrt_version", "r")
+    local version = file:read("*a")
+    file:close()
+    return version
+end
+
+function read_event_name ()
+    local file = io.open("/etc/event_name", "r")
+    local event_name = file:read("*a")
+    file:close()
+    return event_name
+end
+
+function write_event_name (event_name)
+    local file = io.open("/etc/event_name", "w")
+    file:write(event_name)
+    file:close()
+end
+
+function string:split(sSeparator, nMax, bRegexp)
+    assert(sSeparator ~= '')
+    assert(nMax == nil or nMax >= 1)
+ 
+    local aRecord = {}
+ 
+    if self:len() > 0 then
+       local bPlain = not bRegexp
+       nMax = nMax or -1
+ 
+       local nField, nStart = 1, 1
+       local nFirst,nLast = self:find(sSeparator, nStart, bPlain)
+       while nFirst and nMax ~= 0 do
+          aRecord[nField] = self:sub(nStart, nFirst-1)
+          nField = nField+1
+          nStart = nLast+1
+          nFirst,nLast = self:find(sSeparator, nStart, bPlain)
+          nMax = nMax-1
+       end
+       aRecord[nField] = self:sub(nStart)
+    end
+ 
+    return aRecord
+ end
+
+function system (command)
+   return os.execute(command) 
+end
+
+function commit_config () 
+    system("uci commit wireless")
+    system("uci commit network")
+    system("uci commit dhcp")
+    system("uci commit firewall")
+    system("uci commit qos")
+    system("uci commit system")
+    system("/etc/init.d/dnsmasq restart")
+    system("/etc/init.d/network restart")
+    print("Committed Changes!")
+end
+
+function configure_network(entries) 
+    local mode = entries[1]
+    local team_number = tonumber(entries[2])
+    local ssid = entries[3]
+    local wpa_key = entries[4]
+    local firewall = entries[5] == "Y"
+    local bandwidth_limiter = tonumber(entries[6])
+    local dhcp_enabled = entries[7] == "Y"
+    local event_name = entries[8]
+    local end_date = tonumber(entries[9])
+
+    local team_ip_start = string.format("10.%i.%i", math.floor(team_number / 100), math.floor(team_number % 100))
+
+    local has_security = not (wpa_key == "")
+    local is_24G = mode == "AP24" or mode == "B24"
+    local is_bridged = mode == "B24" or mode == "B5"
+
+    print("Configuring WiFi Networks...")
+    system(string.format("uci set wireless.@wifi-iface[0].ssid=%s", ssid))
+    system(string.format("uci set wireless.@wifi-iface[1].ssid=%s", ssid))
+    system(string.format("uci set wireless.@wifi-iface[0].key=%s", wpa_key))
+    system(string.format("uci set wireless.@wifi-iface[1].key=%s", wpa_key))
+
+    if has_security then
+        system("uci set wireless.@wifi-iface[0].encryption=psk2")
+        system("uci set wireless.@wifi-iface[1].encryption=psk2")
+    else
+        system("uci set wireless.@wifi-iface[0].encryption=none")
+        system("uci set wireless.@wifi-iface[1].encryption=none")
+    end
+
+    if is_bridged then
+        print("Configuring IP for Bridge...")
+        system(string.format("uci set network.stabridge.ipaddr=%s.1", team_ip_start))
+        system(string.format("uci set network.lan.gateway=%s.4", team_ip_start))
+        system(string.format("uci set network.wwan.ipaddr=%s.1", team_ip_start))
+        system(string.format("uci set network.wwan.gateway=%s.4", team_ip_start))
+        system(string.format("uci set network.lan.ipaddr=%s.1", team_ip_start))
+        system("uci set network.wwan.netmask=255.255.255.0")
+        system("uci set network.lan.netmask=255.255.255.0")
+
+        print("Configuring Wifi Mode for Bridge...");
+        system("uci set wireless.@wifi-iface[0].mode=sta")
+        system("uci set wireless.@wifi-iface[1].mode=sta")
+
+        if is_24G then
+            print("Enabling Radio #0 (Is this really 2.4G, needs testing.)")
+            system("uci set wireless.radio0.disabled=0")
+            system("uci set wireless.radio1.disabled=1")
+        else
+            print("Enabling Radio #1 (Is this really 5G, needs testing.)")
+            system("uci set wireless.radio0.disabled=1")
+            system("uci set wireless.radio1.disabled=0")
+        end
+
+        print("Configuring DHCP: ", dhcp_enabled)
+        if dhcp_enabled then
+            system(string.format("uci set dhcp.apWired.ignore=0"))
+            system(string.format("uci set dhcp.apWireless.ignore=1"))
+            system(string.format("uci set dhcp.apWired.start=200"))
+            system(string.format("uci set dhcp.apWired.limit=20"))
+            system(string.format("uci set dhcp.apWired.dhcp_option=\"1,255.255.255.0 28,%s.255\"", team_ip_start))
+            system(string.format("uci set dhcp.apWireless.dhcp_option=\"1,255.255.255.0 28,%s.255\"", team_ip_start))
+            system(string.format("uci set dhcp.@host[0].ip=%s.2", team_ip_start))
+            system(string.format("uci set dhcp.@host[0].name=roborio-%i-FRC", team_number))
+        else
+            system("uci set dhcp.apWired.ignore=0")
+            system("uci set dhcp.apWireless.ignore=0")
+        end
+
+        print("Configuring LEDs...")
+        system("uci set system.@led[0].sysfs=om5p:red:wifi")
+        system("uci set system.@led[1].sysfs=om5p:green:wifi")
+        system("uci set system.@led[0].default=0")
+        system(string.format("uci set system.@led[1].dev=wlan%d", bool_to_number(is_24G)))
+    else
+        print("Configuring IP for AP...")
+        system(string.format("uci set network.stabridge.ipaddr=%s.1", team_ip_start))
+        system(string.format("uci delete network.lan.gateway"))
+        system(string.format("uci set network.wwan.ipaddr=%s.129", team_ip_start))
+        system(string.format("uci delete network.wwan.gateway"))
+        system(string.format("uci set network.lan.ipaddr=%s.1", team_ip_start))
+        system(string.format("uci set network.wwan.netmask=255.255.255.128"))
+        system(string.format("uci set network.lan.netmask=255.255.255.128"))
+
+        print("Configuring DHCP: ", dhcp_enabled)
+        if dhcp_enabled then
+            system(string.format("uci set dhcp.apWired.ignore=0"))
+            system(string.format("uci set dhcp.apWireless.ignore=0"))
+            system(string.format("uci set dhcp.apWired.start=10"))
+            system(string.format("uci set dhcp.apWired.limit=100"))
+            system(string.format("uci set dhcp.apWired.dhcp_option=\"1,255.255.255.0 28,%s.255\"", team_ip_start))
+            system(string.format("uci set dhcp.apWireless.dhcp_option=\"1,255.255.255.0 28,%s.255\"", team_ip_start))
+            system(string.format("uci set dhcp.@host[0].ip=%s.2", team_ip_start))
+            system(string.format("uci set dhcp.@host[0].name=roborio-%i-FRC", team_number))
+        else
+            system("uci set dhcp.apWired.ignore=0")
+            system("uci set dhcp.apWireless.ignore=0")
+        end
+
+        print("Configuring Wifi Mode for AP...");
+        system("uci set wireless.@wifi-iface[0].mode=ap")
+        system("uci set wireless.@wifi-iface[1].mode=ap")
+        if is_24G then
+            print("Enabling Radio #0 (Is this really 2.4G, needs testing.)")
+            system("uci set wireless.radio0.disabled=1")
+            system("uci set wireless.radio1.disabled=0")
+        else
+            print("Enabling Radio #1 (Is this really 5G, needs testing.)")
+            system("uci set wireless.radio0.disabled=0")
+            system("uci set wireless.radio1.disabled=1")
+            system(string.format("uci set wireless.@wifi-iface[0].ssid=%s_5g", ssid))
+        end
+
+        print("Configuring LEDs...")
+        system("uci set system.@led[0].sysfs=om5p:red:wifi")
+        system("uci set system.@led[1].sysfs=om5p:green:wifi")
+        system("uci set system.@led[0].default=1")
+        system(string.format("uci set system.@led[1].dev=wlan%d", bool_to_number(is_24G)))
+    end
+
+    if firewall then
+        system("uci set firewall.@zone[0].network=lan")
+        system("uci set firewall.@zone[1].network=wwan")
+    else 
+        system("uci set firewall.@zone[0].network=\"lan wwan\"")
+        system("uci set firewall.@zone[1].network=")
+    end
+
+    if bandwidth_limiter then
+        system("uci set qos.wwan.enabled=1")
+        system(string.format("uci set qos.wwan.upload=%i", bandwidth_limiter))
+    else
+        system("uci set qos.wwan.enabled=0")
+    end
+
+    print("Committing Config...")
+    commit_config()
+
+    write_event_end_time(event_end_time)
+    write_event_name(event_name)
+end
+
+print("Starting server on port 8888")
+
+while 1 do
+
+  local client = server:accept()
+
+  client:send("0-1:" .. read_event_end_time() .. ":".. read_openwrt_version() .. ":" .. read_event_name() .. "\n")
+
+  line = client:receive()
+
+  if line then
+    array = line:split(",")
+    configure_network(array)
+  end
+
+end
