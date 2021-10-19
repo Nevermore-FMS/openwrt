@@ -41,5 +41,5 @@ jobs:
       with:
         repo_token: ${{ secrets.GITHUB_TOKEN }}
         asset_name: nevermore-fimware-om5p-ac.bin
-        path: bin/targets/ar71xx/generic/openwrt-ar71xx-generic-om5pac-squashfs-factory.bin
+        file: bin/targets/ar71xx/generic/openwrt-ar71xx-generic-om5pac-squashfs-factory.bin
         tag: ${{ github.ref }}
