@@ -229,7 +229,11 @@ print("Starting server on port 8888")
 
 while 1 do
 
+  print("Waiting for connection...")
+
   local client = server:accept()
+
+  print("Accepted Connection.")
 
   client:send("0-1:" .. read_event_end_time() .. ":".. read_openwrt_version() .. ":" .. read_event_name() .. "\n")
 
