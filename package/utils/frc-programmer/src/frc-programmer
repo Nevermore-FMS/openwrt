@@ -92,6 +92,8 @@ function configure_network(entries)
     local dhcp_enabled = entries[7] == "Y"
     local event_name = entries[8]
     local end_date = tonumber(entries[9])
+    local use_enterprise = entries[10] == "Y"
+    local username = entries[11]
 
     local team_ip_start = string.format("10.%i.%i", math.floor(team_number / 100), math.floor(team_number % 100))
 
@@ -105,12 +107,21 @@ function configure_network(entries)
     system(string.format("uci set wireless.@wifi-iface[0].key=%s", wpa_key))
     system(string.format("uci set wireless.@wifi-iface[1].key=%s", wpa_key))
 
-    if has_security then
-        system("uci set wireless.@wifi-iface[0].encryption=psk2")
-        system("uci set wireless.@wifi-iface[1].encryption=psk2")
+    if is_bridged and use_enterprise then
+        system("uci set wireless.@wifi-iface[0].encryption=wpa2")
+        system("uci set wireless.@wifi-iface[1].encryption=wpa2")
+        system(string.format("uci set wireless.@wifi-iface[0].identity=%s", username))
+        system(string.format("uci set wireless.@wifi-iface[1].identity=%s", username))
+        system(string.format("uci set wireless.@wifi-iface[0].password=%s", wpa_key))
+        system(string.format("uci set wireless.@wifi-iface[1].password=%s", wpa_key))
     else
-        system("uci set wireless.@wifi-iface[0].encryption=none")
-        system("uci set wireless.@wifi-iface[1].encryption=none")
+        if has_security then
+            system("uci set wireless.@wifi-iface[0].encryption=psk2")
+            system("uci set wireless.@wifi-iface[1].encryption=psk2")
+        else
+            system("uci set wireless.@wifi-iface[0].encryption=none")
+            system("uci set wireless.@wifi-iface[1].encryption=none")
+        end
     end
 
     if is_bridged then
@@ -241,7 +252,9 @@ while 1 do
 
   if line then
     array = line:split(",")
-    configure_network(array)
+    if #array >= 11 then
+        configure_network(array)
+    end
   end
 
 end
